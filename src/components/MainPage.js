@@ -1,7 +1,9 @@
 const TelegramBot = require('node-telegram-bot-api');
 const axios = require('axios');
+const userSpaces = {};
+const token = '6333023640:AAFfQ8H1uYOrP-q7maIgfiFzulSTnkTQ08s'; // Замените на свой токен
+const userCurrentState = {};
 
-const token = '6333023640:AAFfQ8H1uYOrP-q7maIgfiFzulSTnkTQ08s'; // Замените на ваш токен
 const bot = new TelegramBot(token, { polling: true });
 
 const userState = {};
@@ -31,14 +33,13 @@ bot.on('message', (msg) => {
   const userId = msg.from.id;
   const chatId = msg.chat.id;
   const messageText = msg.text;
-  
 
   if (userState[chatId] && userState[chatId].stage === 'name') {
-    userState[chatId].first_name = messageText; // Изменили имя
+    userState[chatId].first_name = messageText;
     bot.sendMessage(chatId, 'Введите вашу фамилию:');
     userState[chatId].stage = 'surname';
   } else if (userState[chatId] && userState[chatId].stage === 'surname') {
-    userState[chatId].last_name = messageText; // Изменили фамилию
+    userState[chatId].last_name = messageText;
     bot.sendMessage(chatId, 'Введите вашу почту:');
     userState[chatId].stage = 'email';
   } else if (userState[chatId] && userState[chatId].stage === 'email') {
@@ -69,15 +70,20 @@ bot.on('message', (msg) => {
 });
 
 // Функция для отправки меню с кнопками
-function sendMenu(chatId) {
-    
+function sendMenu(chatId, showBackButton = false) {
+  let keyboard = [
+    ['Мое пространство'],
+    ['Создать пространство'],
+    ['Удалить пространство'],
+  ];
+
+  if (showBackButton) {
+    keyboard.push(['Назад']);
+  }
+
   const menuOptions = {
     reply_markup: {
-      keyboard: [
-        ['Мое пространство'],
-        ['Создать пространство'],
-        ['Удалить пространство'],
-      ],
+      keyboard,
       resize_keyboard: true,
     },
   };
@@ -85,12 +91,28 @@ function sendMenu(chatId) {
   bot.sendMessage(chatId, 'Выберите действие:', menuOptions);
 }
 
-// Обработка нажатия на кнопки меню
-bot.onText(/Мое пространство/, (msg) => {
-    const chatId = msg.chat.id;
-    const userId = msg.from.id; // Добавьте эту строку, чтобы получить userId
-    bot.sendMessage(chatId, 'Вы выбрали "Мое пространство"');
-    sendSpacesByUserId(chatId, userId);
+// Обработка нажатия на кнопку "Мое пространство"
+bot.onText(/Мое пространство/, async (msg) => {
+  const chatId = msg.chat.id;
+  const userId = msg.from.id;
+
+  try {
+    // Получение списка пространств
+    const spacesResponse = await axios.post('http://26.177.173.160:8888/space/spacesbyuserid', ({ telegram_id: userId }).toString());
+    const spaces = spacesResponse.data.data;
+
+    // Сохраняем список пространств для данного пользователя
+    userSpaces[userId] = spaces;
+
+    // Сохраняем текущее состояние пользователя
+    userCurrentState[userId] = 'spaces';
+
+    // Отправляем сообщение с кнопками для пространств и кнопкой "Назад"
+    sendSpacesMenu(chatId, spaces, true);
+  } catch (error) {
+    console.error('Ошибка при получении списка пространств:', error);
+    bot.sendMessage(chatId, 'Произошла ошибка при получении списка пространств.');
+  }
 });
 
 bot.onText(/Создать пространство/, (msg) => {
@@ -103,42 +125,70 @@ bot.onText(/Удалить пространство/, (msg) => {
   bot.sendMessage(chatId, 'Вы выбрали "Удалить пространство"');
 });
 
+// Обработка нажатия на кнопки пространств
+bot.onText(/(.+)/, (msg, match) => {
+  const chatId = msg.chat.id;
+  const userId = msg.from.id;
+  const selectedSpaceName = match[1];
+
+  if (userCurrentState[userId] === 'spaces') {
+    if (userSpaces[userId]) {
+      const selectedSpace = userSpaces[userId].find((space) => space.name === selectedSpaceName);
+
+      if (selectedSpace) {
+        sendSpaceInformation(chatId, selectedSpace);
+      } else {
+        bot.sendMessage(chatId, 'Выбранное пространство не найдено.');
+      }
+    } else {
+      bot.sendMessage(chatId, 'У вас нет доступных пространств.');
+    }
+  }
+});
+
+// Обработка нажатия на кнопку "Назад"
+bot.onText(/Назад/, (msg) => {
+  const chatId = msg.chat.id;
+  const userId = msg.from.id;
+
+  if (userCurrentState[userId] === 'spaces') {
+    sendMenu(chatId, true);
+    userCurrentState[userId] = 'menu';
+  }
+});
+
 // Функция для выполнения POST-запроса на регистрацию пользователя
 function registerUser(userData, chatId) {
-  // URL сервера для регистрации
   const signupUrl = 'http://26.177.173.160:8888/auth/signup';
-  
 
   axios
     .post(signupUrl, userData)
     .then((response) => {
-      // Обработка успешной регистрации
       console.log('Пользователь успешно зарегистрирован:', response.data);
-       bot.sendMessage(chatId, `${JSON.stringify(response.data.message)}`);
-       
-      
+      bot.sendMessage(chatId, `${JSON.stringify(response.data.message)}`);
     })
     .catch((error) => {
-      // Обработка ошибки регистрации
       console.error('Ошибка при регистрации пользователя:', error);
     });
 }
-
-// Функция для отправки запроса на получение пространств по ID пользователя
-function sendSpacesByUserId(chatId, telegram_id) {
-    const spacesUrl = `http://26.177.173.160:8888/space/spacesbyuserid`;
+function sendSpaceInformation(chatId, space) {
+    const spaceInfo = `Название пространства: ${space.name}\nОписание: ${space.description}`;
+    bot.sendMessage(chatId, spaceInfo);
   
-    axios
-      .post(spacesUrl, ({telegram_id}).toString())
-      .then((response) => {
-        // Обработка успешного получения данных о пространствах
-        console.log('Пространства пользователя:', response.data);
-        bot.sendMessage(chatId, `Пространства пользователя: ${JSON.stringify(response.data)}`);
-      })
-      .catch((error) => {
-        // Обработка ошибки получения данных о пространствах
-        console.error('Ошибка при получении пространств пользователя:', error);
-      });
+    sendMenu(chatId, true);
   }
-  
+
+function sendSpacesMenu(chatId, spaces) {
+  const keyboard = spaces.map((space) => [space.name]);
+
+  const menuOptions = {
+    reply_markup: {
+      keyboard,
+      resize_keyboard: true,
+    },
+  };
+
+  bot.sendMessage(chatId, 'Выберите пространство:', menuOptions);
+}
+
 
