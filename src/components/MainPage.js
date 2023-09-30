@@ -87,8 +87,10 @@ function sendMenu(chatId) {
 
 // Обработка нажатия на кнопки меню
 bot.onText(/Мое пространство/, (msg) => {
-  const chatId = msg.chat.id;
-  bot.sendMessage(chatId, 'Вы выбрали "Мое пространство"');
+    const chatId = msg.chat.id;
+    const userId = msg.from.id; // Добавьте эту строку, чтобы получить userId
+    bot.sendMessage(chatId, 'Вы выбрали "Мое пространство"');
+    sendSpacesByUserId(chatId, userId);
 });
 
 bot.onText(/Создать пространство/, (msg) => {
@@ -113,6 +115,7 @@ function registerUser(userData, chatId) {
       // Обработка успешной регистрации
       console.log('Пользователь успешно зарегистрирован:', response.data);
        bot.sendMessage(chatId, `${JSON.stringify(response.data.message)}`);
+       
       
     })
     .catch((error) => {
@@ -120,3 +123,22 @@ function registerUser(userData, chatId) {
       console.error('Ошибка при регистрации пользователя:', error);
     });
 }
+
+// Функция для отправки запроса на получение пространств по ID пользователя
+function sendSpacesByUserId(chatId, telegram_id) {
+    const spacesUrl = `http://26.177.173.160:8888/space/spacesbyuserid`;
+  
+    axios
+      .post(spacesUrl, ({telegram_id}).toString())
+      .then((response) => {
+        // Обработка успешного получения данных о пространствах
+        console.log('Пространства пользователя:', response.data);
+        bot.sendMessage(chatId, `Пространства пользователя: ${JSON.stringify(response.data)}`);
+      })
+      .catch((error) => {
+        // Обработка ошибки получения данных о пространствах
+        console.error('Ошибка при получении пространств пользователя:', error);
+      });
+  }
+  
+
